@@ -439,11 +439,13 @@ function select_agg_records(stream, args)
   local filter_func = nil
   if filter_func_str ~= nil and #filter_func_str > 0 then
     local eval = loadstring or load
-    filter_func = eval("if ("..filter_func_str..") then select_rec = true end")
+    local err = nil
 
-    if filter_func == nil then
-      return {FAIL = "Error Parsing Filter: "..filter_func_str}
-    end
+    filter_func, err = eval("if ("..filter_func_str..") then select_rec = true end")
+
+    if err ~= nil then
+      error("Error Parsing Filter: "..err)
+    end      
   end
 
   local aggregate_field_funcs = nil
@@ -454,9 +456,11 @@ function select_agg_records(stream, args)
     aggregate_field_funcs = {}
     for alias, defs in map.pairs(aggregate_fields) do
       if getmetatable(defs) == mapmetadata then
-        aggregate_field_funcs[alias] = eval("result = "..defs.expr)
-        if aggregate_field_funcs[alias] == nil then
-          return {FAIL = "Error Parsing Expr: "..defs.expr}
+        local err = nil
+
+        aggregate_field_funcs[alias], err = eval("result = "..defs.expr)
+        if err ~= nil then
+          error("Error Parsing Expr: "..err)
         end
       else
         if raw_fields == nil then raw_fields = {} end
@@ -488,8 +492,13 @@ function select_agg_records(stream, args)
         setfenv(f, context)
         f()
 
-        if type(context.result) == "number" then
+        local t = type(context.result)
+        if t == "number" then
           info.agg_results[alias] = context.result
+        elseif t == "nil" then
+          -- do nothing; nil is acceptible, but not actionable
+        else
+          error("Expression for field `"..alias.."` ("..aggregate_fields[alias].expr..") returned a value of type `"..t.."`, instead of number or nil")
         end
       end
     end
