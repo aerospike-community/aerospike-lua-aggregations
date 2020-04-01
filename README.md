@@ -1,6 +1,10 @@
 # `AggAPI.lua`
 
-This UDF can help you with aggregations on the Aerospike database. You need to register this lua UDF on the server using your client's API, and then use aggregations to call it with required parameters.
+This UDF will help you with arbitrary aggregations on the Aerospike database. You need to register this lua UDF on the server using your client's API, and then use aggregation API on your chosen Aerospike Client to call it with required parameters.
+
+## Limitations
+
+Aerospike Server supports Lua 5.1, in which all numbers are floats with 51 bits significands (52 with sign bit). This means integers bigger than 2^51 will return invalid values.
 
 ## How to setup?
 
@@ -11,6 +15,12 @@ luaFile, _ := ioutil.ReadFile("aggAPI.lua")
 regTask, _ := client.RegisterUDF(nil, luaFile, "aggAPI.lua", aero.LUA)
 // wait until UDF is created on the server.
 _ <-regTask.OnComplete()
+```
+
+```java
+RegisterTask task = client.register(params.policy, "udf/aggAPI.lua", "aggAPI.lua", Language.LUA);
+// Alternately register from resource.
+task.waitTillComplete();
 ```
 
 ## How does it work?
@@ -52,9 +62,106 @@ The Lua streaming UDF will use the argument you pass to it in its calculations b
 
 The client does not calculate average values, but that can be accomplished as the last step on the client.
 
+Regardless of the aggregations you have asked, the count of final records will always be returned in `aggs.count`. Try to avoid this name in your requests.
+
 The `key` value is the hash used to group the results for reduction. The `aggs` key returns the aggregate values, while the `rec` key returns the bins which were passed as `raw_field`.
 
 Keep in mind that the values are limited to the size of Lua's value size, which is 51 bits of significant integer values.
+
+Example in Go:
+```go
+stm := aero.NewStatement(nsName, setName)
+
+functionArgsMap := map[string]interface{}{
+  "raw_fields": map[string]string{
+    "name": "name",
+  },
+  "aggregate_fields": map[string]interface{}{
+    "max(age)":        map[string]string{"func": "max", "expr": "result =  rec['age'] ~= nil and rec['age']"},
+    "count(age)":      map[string]string{"func": "count", "expr": "result = ( rec['age'] ) ~= nil and 1"},
+    "min(age)":        map[string]string{"func": "min", "expr": "result =  rec['age'] ~= nil and rec['age']"},
+    "sum(age*salary)": map[string]string{"func": "sum", "expr": "result =  (rec['age']  or 0) * (rec['salary'] or 0)"},
+  },
+  "filter": "if rec['age'] ~= nil and rec['age'] >5  then select_rec = true end",
+  "group_by_fields": []string{
+    "name",
+  },
+}
+
+recordset, err := client.QueryAggregate(nil, stm, "aggAPI", "select_agg_records", aero.NewValue(functionArgsMap))
+defer recordset.Close()
+
+if err != nil {
+  return err
+}
+
+for result := range recordset.Results() {
+  if result.Err != nil {
+    return result.Err
+  }
+
+  pp.Println(result.Record.Bins["SUCCESS"])
+}
+```
+
+Example in Java:
+```java
+String stringToParse = String.format("{\n" +
+    "  \"filter\":    \"if rec['test_id'] ~= nil and rec['test_id'] == %s then select_rec = true end\",\n" +
+    "  \"raw_fields\": {\n" +
+    "    \"test_id\": \"test_id\",\n" +
+    "    \"state\": \"state\",\n" +
+    "  },\n" +
+    "  \"aggregate_fields\":         {\n" +
+    "    \"count(state)\": {\"func\":\"count\", \"expr\": \"result = rec['state'] ~= nil and 1\"},\n" +
+    "  },\n" +
+    "  \"group_by_fields\": [\n" +
+    "    \"test_id\",\n" +
+    "    \"state\",\n" +
+    "  ],\n" +
+    "}", testId.toString());
+
+JSONObject json = new JSONObject(stringToParse);
+Map functionArgsMap  = toMap(json);
+
+console.info("Query for: ns=%s set=%s index=%s bin=%s",
+  params.namespace, params.set, indexName, binName);
+console.info("Using query: %s",
+    functionArgsMap.toString());
+
+Statement stmt = new Statement();
+stmt.setNamespace(params.namespace);
+stmt.setSetName(params.set);
+stmt.setBinNames(binName);
+
+// Optional filter via Index
+stmt.setFilter(Filter.equal(binName, testId));
+stmt.setIndexName(indexName);
+
+ResultSet rs = client.queryAggregate(null, stmt,"aggAPI","select_agg_records", Value.get(functionArgsMap));
+
+try {
+  if (rs.next()) {
+    Object obj = rs.getObject();
+
+    if (obj instanceof Map<?, ?>) {
+      Map<String, Map> map = (Map<String, Map>) obj;
+
+      for (Map<?,?> x: map.values()){
+        console.warn("res: " +
+            ((Map<?,?>)x.get("rec")).get("test_id") + " " +
+            ((Map<?,?>)x.get("rec")).get("state") + " " +
+            ((Map<?,?>)x.get("aggs")).get("count"));
+      }
+    }
+  }
+}
+
+finally {
+  rs.close();
+}
+
+```
 
 ## How can I calculate a sum?
 
@@ -68,11 +175,8 @@ call the `select_agg_records` function with following argument:
 
 ```json
 {
-  "field_aliases":         {
-    "sum(salary)": "result = rec['salary'] or 0",
-  },
-  "aggregate_fields": {
-    "sum(salary)": "sum",
+  "aggregate_fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "result = rec['salary'] or 0"},
   },
 }
 ```
@@ -89,13 +193,10 @@ provide the following arguments:
 
 ```json
 {
+  "aggregate_fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "result =  rec['salary'] or 0"},
+  },
   "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
-  "field_aliases":         {
-    "sum(salary)": "result =  rec['salary'] or 0",
-  },
-  "aggregate_fields": {
-    "sum(salary)": "sum",
-  },
 }
 ```
 
@@ -111,17 +212,14 @@ provide the following arguments:
 
 ```json
 {
-  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
-  "field_aliases":         {
-    "sum(salary)": "result = rec['salary'] or 0",
-  },
   "raw_fields": {
     "age":  "age",
     "name": "name",
   },
-  "aggregate_fields": {
-    "sum(salary)": "sum",
+  "aggregate_fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "result = rec['salary'] or 0"},
   },
+  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
   "group_by_fields": [
     "age",
     "name",
@@ -143,20 +241,15 @@ provide the following arguments:
 
 ```json
 {
-  "filter":    "if rec['age'] ~= nil and rec['age'] >25 then select_rec = true end",
-  "field_aliases":         {
-    "min(salary)": "result = rec['salary']",
-    "max(salary)": "result = rec['salary']",
-    "sum(salary)": "result = rec['salary']",
-  },
   "raw_fields": {
     "age": "age",
   },
-  "aggregate_fields": {
-    "min(salary)": "min",
-    "max(salary)": "max",
-    "sum(salary)": "sum",
+  "aggregate_fields":         {
+    "min(salary)": {"func": "min" , "expr": "result = rec['salary']"},
+    "max(salary)": {"func": "max" , "expr": "result = rec['salary']"},
+    "sum(salary)": {"func": "sum" , "expr": "result = rec['salary']"},
   },
+  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
   "group_by_fields": [
     "age",
   ],
@@ -175,20 +268,15 @@ provide the following arguments:
 
 ```json
 {
-  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
-  "field_aliases":         {
-    "sum(salary * 2)": "result = rec['salary'] * 2",
-    "min(salary)":     "result = rec['salary']",
-    "max(salary)":     "result = rec['salary']",
-  },
   "raw_fields": {
     "age": "age",
   },
-  "aggregate_fields": {
-    "sum(salary * 2)": "sum",
-    "min(salary)":     "min",
-    "max(salary)":     "max",
+  "aggregate_fields":         {
+    "sum(salary * 2)": {"func": "sum" , "expr": "result = rec['salary'] * 2"},
+    "min(salary)":     {"func": "min" , "expr": "result = rec['salary']"},
+    "max(salary)":     {"func": "max" , "expr": "result = rec['salary']"},
   },
+  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
   "group_by_fields": [
     "age",
   ],
@@ -226,30 +314,23 @@ then the parameters sent to the UDF would be:
 
 There are 5 different input that need to be sent to the Lua UDF. Not all are required for every command. These values are:
 
-- `"filter"`: Filter is a lua `if` statement. It can include any valid lua boolean statement. These statements have a generic form of:
-	`if <boolean expression> then select_rec = true end`
-
-	If the value of the `select_rec` is `true`, the record will be included in the results. Example:
-   `if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end`
-
-- `"field_aliases"`: `fiald_aliases` is the map of the aliases for complex fields. For example:
-    - `"sum(salary * 2)": "result = rec['salary'] * 2"` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
-    - `"min(salary)":     "result = rec['salary']"`: use the value of the bin `salary` to calculate min(salary)    
-    - `"max(salary * 5)":     "result = (rec['salary'] or 0) * 5"`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default.
-
 - `"raw_fields"`: Raw fields denote fields in the result which do not require any complex calculation. The map key is the alias, while the map value is the name of the existing bin in the database. Example:
   
   `"raw_fields": {
-    "age": "age", "salary_usd" : "salary"
+    "age": "age", 
+    "salary_usd" : "salary"
   }`
+
+- `"aggregate_fields"`: `aggregate_fields` is the map of the aliases for complex and calculated fields. For example:
+    - `"sum(salary * 2)": {"func": "sum", "expr": "result = rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
+    - `"min(salary)":     {"func": "sum", "expr": "result = rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
+    - `"max(salary * 5)": {"func": "sum", "expr": "result = (rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
   
-- `"aggregate_fields"`: Defines the aggregate type of complex fields defined in `field_aliases`. The valid values are `count`, `sum`, `min` and `max`. Note that the name of the fields should be exactly the same as the ones declared in `field_aliases`. Example:
-	  
-  `"aggregate_fields": {
-    "sum(salary * 2)": "sum",
-    "min(salary)":     "min",
-    "max(salary * 5)": "max",
-  }`
+- `"filter"`: Filter is a lua `if` statement. It can include any valid lua boolean statement. These statements have a generic form of:
+  `if <boolean expression> then select_rec = true end`
+
+  If the value of the `select_rec` is `true`, the record will be included in the results. Example:
+   `if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end`
   
 - `"group_by_fields"`: List of field aliases to group the fields. Example:
 	`[

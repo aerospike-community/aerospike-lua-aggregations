@@ -432,12 +432,10 @@ end
 -- the final reduction happens on the client itself
 -----------------------------------------------------------------
 function select_agg_records(stream, args)
-  local fields = args["raw_fields"]
-  local groupByFields = args["group_by_fields"]
-  local aggFieldNames = args["aggregate_fields"]
-
+  local raw_fields = args["raw_fields"]
+  local aggregate_fields = args["aggregate_fields"]
   local filter_func_str = args["filter"]
-  local field_defs = args["field_aliases"]
+  local group_by_fields = args["group_by_fields"]
 
   local filter_func = nil
   if filter_func_str ~= nil and #filter_func_str > 0 then
@@ -445,20 +443,20 @@ function select_agg_records(stream, args)
     filter_func = eval(filter_func_str)
 
     if filter_func == nil then
-      return {FAIL = "Error Parsing"..filter_func_str}
+      return {FAIL = "Error Parsing Filter: "..filter_func_str}
     end
   end
 
-  local field_funcs = nil
-  if field_defs ~= nil then
+  local aggregate_field_funcs = nil
+  if aggregate_fields ~= nil then
     local eval = loadstring or load
 
-    if field_defs ~= nil then
-      field_funcs = {}
-      for fn, exp in map.pairs(field_defs) do
-        field_funcs[fn] = eval(exp)
-        if field_funcs[fn] == nil then
-          return {FAIL = "Error Parsing"..filter_func_str}
+    if aggregate_fields ~= nil then
+      aggregate_field_funcs = {}
+      for alias, defs in map.pairs(aggregate_fields) do
+        aggregate_field_funcs[alias] = eval(defs.expr)
+        if aggregate_field_funcs[alias] == nil then
+          return {FAIL = "Error Parsing Expr: "..defs.expr}
         end
       end
     end
@@ -470,35 +468,33 @@ function select_agg_records(stream, args)
     local accu = map()
     local info = map{key = '', rec = map(), aggs = map({count = 0})}
 
-    if fields ~= nil then
-      for alias, v in map.iterator(fields) do
+    if raw_fields ~= nil then
+      for alias, v in map.iterator(raw_fields) do
         info.rec[alias] = rec[v]
       end
     end
 
-    if field_funcs ~= nil then
-      for alias, f in pairs(field_funcs) do
+    if aggregate_field_funcs ~= nil then
+      for alias, f in pairs(aggregate_field_funcs) do
         local context = {rec = rec, result = nil}
 
         -- sandbox the function
         setfenv(f, context)
         f()
 
-        if type(context.result) == "number" then
-          info.aggs[alias] = (info.aggs[alias] or 0) + (context.result or 0)
-        else
-          info.aggs[alias] = (info.aggs[alias] or 0)
-        end
+        info.aggs[alias] = context.result
       end
     end
 
     info.aggs.count = info.aggs.count + 1
 
     local m = md5.new()
-    if groupByFields ~= nil then
-      for v in list.iterator(groupByFields) do
-        m:update('.')
-        m:update(tostring(rec[v] or info.rec[v] or info.aggs[v]))
+    if group_by_fields ~= nil then
+      for v in list.iterator(group_by_fields) do
+        local lv = tostring(rec[v] or info.rec[v] or info.aggs[v])
+        -- makes sure sharded values do not concat to the exact same value
+        m:update(tostring(#lv))
+        m:update(lv)
       end
     end
     local key = md5.tohex(m:finish())
@@ -511,25 +507,35 @@ function select_agg_records(stream, args)
 
   local function accu_tuples(tuple1, tuple2)
     -- accumulate
-    tuple1.aggs.count = (tuple1.aggs.count or 0) + (tuple2.aggs.count or 0)
+    local aggs = map()
+
+    aggs.count = (tuple1.aggs.count or 0) + (tuple2.aggs.count or 0)
 
     for f, v in map.pairs(tuple1.aggs) do
-      if aggFieldNames[f] == "sum" or aggFieldNames[f] == "count" then
-        tuple1.aggs[f] = v + tuple2.aggs[f]
-      elseif aggFieldNames[f] == "min" then
-        if (tuple2.aggs[f] ~= nil) and (tuple1.aggs[f] ~= nil) then
-          if tuple2.aggs[f] < tuple1.aggs[f] then tuple1.aggs[f] = tuple2.aggs[f] end
-        elseif tuple2.aggs[f] ~= nil and tuple1.aggs[f] == nil then 
-          tuple1.aggs[f] = tuple2.aggs[f]
+      local fn = (aggregate_fields[f] and aggregate_fields[f].func) or ""
+
+      local t1 = tuple1.aggs[f]
+      local t2 = tuple2.aggs[f]
+      aggs[f] = t1
+
+      if fn == "sum" or fn == "count" then
+        aggs[f] = v + t2
+      elseif fn == "min" then
+        if (t2 ~= nil) and (t1 ~= nil) then
+          if t2 < t1 then aggs[f] = t2 end
+        elseif t2 ~= nil and t1 == nil then 
+          aggs[f] = t2
         end
-      elseif aggFieldNames[f] == "max" then
-        if (tuple2.aggs[f] ~= nil) and (tuple1.aggs[f] ~= nil) then
-          if tuple2.aggs[f] > tuple1.aggs[f] then tuple1.aggs[f] = tuple2.aggs[f] end
-        elseif tuple2.aggs[f] ~= nil and tuple1.aggs[f] == nil then 
-          tuple1.aggs[f] = tuple2.aggs[f]
+      elseif fn == "max" then
+        if (t2 ~= nil) and (t1 ~= nil) then
+          if t2 > t1 then aggs[f] = t2 end
+        elseif t2 ~= nil and t1 == nil then 
+          aggs[f] = t2
         end
       end
     end
+
+    tuple1.aggs = aggs
 
     return tuple1
   end
