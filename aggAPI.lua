@@ -432,15 +432,14 @@ end
 -- the final reduction happens on the client itself
 -----------------------------------------------------------------
 function select_agg_records(stream, args)
-  local raw_fields = args["raw_fields"]
-  local aggregate_fields = args["aggregate_fields"]
+  local aggregate_fields = args["fields"]
   local filter_func_str = args["filter"]
   local group_by_fields = args["group_by_fields"]
 
   local filter_func = nil
   if filter_func_str ~= nil and #filter_func_str > 0 then
     local eval = loadstring or load
-    filter_func = eval(filter_func_str)
+    filter_func = eval("if ("..filter_func_str..") then select_rec = true end")
 
     if filter_func == nil then
       return {FAIL = "Error Parsing Filter: "..filter_func_str}
@@ -450,14 +449,18 @@ function select_agg_records(stream, args)
   local aggregate_field_funcs = nil
   if aggregate_fields ~= nil then
     local eval = loadstring or load
+    local mapmetadata = getmetatable(map())
 
-    if aggregate_fields ~= nil then
-      aggregate_field_funcs = {}
-      for alias, defs in map.pairs(aggregate_fields) do
-        aggregate_field_funcs[alias] = eval(defs.expr)
+    aggregate_field_funcs = {}
+    for alias, defs in map.pairs(aggregate_fields) do
+      if getmetatable(defs) == mapmetadata then
+        aggregate_field_funcs[alias] = eval("result = "..defs.expr)
         if aggregate_field_funcs[alias] == nil then
           return {FAIL = "Error Parsing Expr: "..defs.expr}
         end
+      else
+        if raw_fields == nil then raw_fields = {} end
+        raw_fields[alias] = defs
       end
     end
   end
@@ -466,10 +469,10 @@ function select_agg_records(stream, args)
   local function map_aggregates(rec)
 
     local accu = map()
-    local info = map{key = '', rec = map(), aggs = map({count = 0})}
+    local info = map{key = '', rec = map(), agg_results = map({count = 0})}
 
     if raw_fields ~= nil then
-      for alias, v in map.iterator(raw_fields) do
+      for alias, v in pairs(raw_fields) do
         info.rec[alias] = rec[v]
       end
     end
@@ -482,16 +485,16 @@ function select_agg_records(stream, args)
         setfenv(f, context)
         f()
 
-        info.aggs[alias] = context.result
+        info.agg_results[alias] = context.result
       end
     end
 
-    info.aggs.count = info.aggs.count + 1
+    info.agg_results.count = info.agg_results.count + 1
 
     local m = md5.new()
     if group_by_fields ~= nil then
       for v in list.iterator(group_by_fields) do
-        local lv = tostring(rec[v] or info.rec[v] or info.aggs[v])
+        local lv = tostring(rec[v] or info.rec[v] or info.agg_results[v])
         -- makes sure sharded values do not concat to the exact same value
         m:update(tostring(#lv))
         m:update(lv)
@@ -509,13 +512,13 @@ function select_agg_records(stream, args)
     -- accumulate
     local aggs = map()
 
-    aggs.count = (tuple1.aggs.count or 0) + (tuple2.aggs.count or 0)
+    aggs.count = (tuple1.agg_results.count or 0) + (tuple2.agg_results.count or 0)
 
-    for f, v in map.pairs(tuple1.aggs) do
+    for f, v in map.pairs(tuple1.agg_results) do
       local fn = (aggregate_fields[f] and aggregate_fields[f].func) or ""
 
-      local t1 = tuple1.aggs[f]
-      local t2 = tuple2.aggs[f]
+      local t1 = tuple1.agg_results[f]
+      local t2 = tuple2.agg_results[f]
       aggs[f] = t1
 
       if fn == "sum" or fn == "count" then
@@ -535,7 +538,7 @@ function select_agg_records(stream, args)
       end
     end
 
-    tuple1.aggs = aggs
+    tuple1.agg_results = aggs
 
     return tuple1
   end

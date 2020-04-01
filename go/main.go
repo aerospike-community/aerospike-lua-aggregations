@@ -63,16 +63,14 @@ func queryAggregate(client *aero.Client, nsName, setName string) error {
 	stm := aero.NewStatement(nsName, setName)
 
 	functionArgsMap := map[string]interface{}{
-		"raw_fields": map[string]string{
-			"name": "name",
+		"fields": map[string]interface{}{
+			"name":            "name",
+			"max(age)":        map[string]string{"func": "max", "expr": "rec['age'] ~= nil and rec['age']"},
+			"count(age)":      map[string]string{"func": "count", "expr": "( rec['age'] ) ~= nil and 1"},
+			"min(age)":        map[string]string{"func": "min", "expr": "rec['age'] ~= nil and rec['age']"},
+			"sum(age*salary)": map[string]string{"func": "sum", "expr": "(rec['age']  or 0) * (rec['salary'] or 0)"},
 		},
-		"aggregate_fields": map[string]interface{}{
-			"max(age)":        map[string]string{"func": "max", "expr": "result =  rec['age'] ~= nil and rec['age']"},
-			"count(age)":      map[string]string{"func": "count", "expr": "result = ( rec['age'] ) ~= nil and 1"},
-			"min(age)":        map[string]string{"func": "min", "expr": "result =  rec['age'] ~= nil and rec['age']"},
-			"sum(age*salary)": map[string]string{"func": "sum", "expr": "result =  (rec['age']  or 0) * (rec['salary'] or 0)"},
-		},
-		"filter": "if rec['age'] ~= nil and rec['age'] >5  then select_rec = true end",
+		"filter": "rec['age'] ~= nil and rec['age'] > 5",
 		"group_by_fields": []string{
 			"name",
 		},

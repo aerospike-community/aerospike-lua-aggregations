@@ -29,34 +29,32 @@ The Lua streaming UDF will use the argument you pass to it in its calculations b
 
 ```json
 {
-	[
-	  "8de6a795aaf29f2a7dad71c6631a1efc": {
-	    "aggs": {
-	      "count(age)":      3.000000,
-	      "max(age)":        45.000000,
-	      "count":           3.000000,
-	      "sum(age*salary)": 101400,
-	      "min(age)":        25.000000,
-	    },
-	    "key": "8de6a795aaf29f2a7dad71c6631a1efc",
-	    "rec": {
-	      "name": "Eva",
-	    },
-	  },
-	  "ed57af7ff6ed54ec8b6b5eec3e2b649a": {
-	    "aggs": {
-	      "count(age)":      1.000000,
-	      "max(age)":        26.000000,
-	      "count":           1.000000,
-	      "sum(age*salary)": 83200,
-	      "min(age)":        26.000000,
-	    },
-	    "key": "ed57af7ff6ed54ec8b6b5eec3e2b649a",
-	    "rec": {
-	      "name": "Riley",
-	    },
-	  },
-	]
+  "8de6a795aaf29f2a7dad71c6631a1efc": {
+    "agg_results": {
+      "count(age)":      3.000000,
+      "max(age)":        45.000000,
+      "count":           3.000000,
+      "sum(age*salary)": 101400,
+      "min(age)":        25.000000,
+    },
+    "key": "8de6a795aaf29f2a7dad71c6631a1efc",
+    "rec": {
+      "name": "Eva",
+    },
+  },
+  "ed57af7ff6ed54ec8b6b5eec3e2b649a": {
+    "agg_results": {
+      "count(age)":      1.000000,
+      "max(age)":        26.000000,
+      "count":           1.000000,
+      "sum(age*salary)": 83200,
+      "min(age)":        26.000000,
+    },
+    "key": "ed57af7ff6ed54ec8b6b5eec3e2b649a",
+    "rec": {
+      "name": "Riley",
+    },
+  },
 }
 ```
 
@@ -73,16 +71,14 @@ Example in Go:
 stm := aero.NewStatement(nsName, setName)
 
 functionArgsMap := map[string]interface{}{
-  "raw_fields": map[string]string{
+  "fields": map[string]interface{}{
     "name": "name",
+    "max(age)":        map[string]string{"func": "max", "expr": "rec['age'] ~= nil and rec['age']"},
+    "count(age)":      map[string]string{"func": "count", "expr": "( rec['age'] ) ~= nil and 1"},
+    "min(age)":        map[string]string{"func": "min", "expr": "rec['age'] ~= nil and rec['age']"},
+    "sum(age*salary)": map[string]string{"func": "sum", "expr": " (rec['age']  or 0) * (rec['salary'] or 0)"},
   },
-  "aggregate_fields": map[string]interface{}{
-    "max(age)":        map[string]string{"func": "max", "expr": "result =  rec['age'] ~= nil and rec['age']"},
-    "count(age)":      map[string]string{"func": "count", "expr": "result = ( rec['age'] ) ~= nil and 1"},
-    "min(age)":        map[string]string{"func": "min", "expr": "result =  rec['age'] ~= nil and rec['age']"},
-    "sum(age*salary)": map[string]string{"func": "sum", "expr": "result =  (rec['age']  or 0) * (rec['salary'] or 0)"},
-  },
-  "filter": "if rec['age'] ~= nil and rec['age'] >5  then select_rec = true end",
+  "filter": "rec['age'] ~= nil and rec['age'] >5 ",
   "group_by_fields": []string{
     "name",
   },
@@ -107,14 +103,12 @@ for result := range recordset.Results() {
 Example in Java:
 ```java
 String stringToParse = String.format("{\n" +
-    "  \"filter\":    \"if rec['test_id'] ~= nil and rec['test_id'] == %s then select_rec = true end\",\n" +
-    "  \"raw_fields\": {\n" +
+    "  \"fields\":         {\n" +
     "    \"test_id\": \"test_id\",\n" +
     "    \"state\": \"state\",\n" +
+    "    \"count(state)\": {\"func\":\"count\", \"expr\": \"rec['state'] ~= nil and 1\"},\n" +
     "  },\n" +
-    "  \"aggregate_fields\":         {\n" +
-    "    \"count(state)\": {\"func\":\"count\", \"expr\": \"result = rec['state'] ~= nil and 1\"},\n" +
-    "  },\n" +
+    "  \"filter\":    \"rec['test_id'] ~= nil and rec['test_id'] == %s\",\n" +
     "  \"group_by_fields\": [\n" +
     "    \"test_id\",\n" +
     "    \"state\",\n" +
@@ -124,14 +118,9 @@ String stringToParse = String.format("{\n" +
 JSONObject json = new JSONObject(stringToParse);
 Map functionArgsMap  = toMap(json);
 
-console.info("Query for: ns=%s set=%s index=%s bin=%s",
-  params.namespace, params.set, indexName, binName);
-console.info("Using query: %s",
-    functionArgsMap.toString());
-
 Statement stmt = new Statement();
-stmt.setNamespace(params.namespace);
-stmt.setSetName(params.set);
+stmt.setNamespace(namespace);
+stmt.setSetName(set);
 stmt.setBinNames(binName);
 
 // Optional filter via Index
@@ -151,7 +140,7 @@ try {
         console.warn("res: " +
             ((Map<?,?>)x.get("rec")).get("test_id") + " " +
             ((Map<?,?>)x.get("rec")).get("state") + " " +
-            ((Map<?,?>)x.get("aggs")).get("count"));
+            ((Map<?,?>)x.get("agg_results")).get("count"));
       }
     }
   }
@@ -175,8 +164,8 @@ call the `select_agg_records` function with following argument:
 
 ```json
 {
-  "aggregate_fields":         {
-    "sum(salary)": {"func": "sum" , "expr": "result = rec['salary'] or 0"},
+  "fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
   },
 }
 ```
@@ -193,10 +182,10 @@ provide the following arguments:
 
 ```json
 {
-  "aggregate_fields":         {
-    "sum(salary)": {"func": "sum" , "expr": "result =  rec['salary'] or 0"},
+  "fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
   },
-  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
 }
 ```
 
@@ -212,14 +201,12 @@ provide the following arguments:
 
 ```json
 {
-  "raw_fields": {
+  "fields":         {
     "age":  "age",
     "name": "name",
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
   },
-  "aggregate_fields":         {
-    "sum(salary)": {"func": "sum" , "expr": "result = rec['salary'] or 0"},
-  },
-  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
   "group_by_fields": [
     "age",
     "name",
@@ -241,15 +228,13 @@ provide the following arguments:
 
 ```json
 {
-  "raw_fields": {
+  "fields":         {
     "age": "age",
+    "min(salary)": {"func": "min" , "expr": "rec['salary']"},
+    "max(salary)": {"func": "max" , "expr": "rec['salary']"},
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary']"},
   },
-  "aggregate_fields":         {
-    "min(salary)": {"func": "min" , "expr": "result = rec['salary']"},
-    "max(salary)": {"func": "max" , "expr": "result = rec['salary']"},
-    "sum(salary)": {"func": "sum" , "expr": "result = rec['salary']"},
-  },
-  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
   "group_by_fields": [
     "age",
   ],
@@ -268,15 +253,13 @@ provide the following arguments:
 
 ```json
 {
-  "raw_fields": {
+  "fields":         {
     "age": "age",
+    "sum(salary * 2)": {"func": "sum" , "expr": "rec['salary'] * 2"},
+    "min(salary)":     {"func": "min" , "expr": "rec['salary']"},
+    "max(salary)":     {"func": "max" , "expr": "rec['salary']"},
   },
-  "aggregate_fields":         {
-    "sum(salary * 2)": {"func": "sum" , "expr": "result = rec['salary'] * 2"},
-    "min(salary)":     {"func": "min" , "expr": "result = rec['salary']"},
-    "max(salary)":     {"func": "max" , "expr": "result = rec['salary']"},
-  },
-  "filter":    "if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end",
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
   "group_by_fields": [
     "age",
   ],
@@ -301,7 +284,7 @@ then the parameters sent to the UDF would be:
 
 ```json
 {
-  "raw_fields": {
+  "fields": {
     "age": "age",
   },
   "group_by_fields": [
@@ -321,16 +304,15 @@ There are 5 different input that need to be sent to the Lua UDF. Not all are req
     "salary_usd" : "salary"
   }`
 
-- `"aggregate_fields"`: `aggregate_fields` is the map of the aliases for complex and calculated fields. For example:
-    - `"sum(salary * 2)": {"func": "sum", "expr": "result = rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
-    - `"min(salary)":     {"func": "sum", "expr": "result = rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
-    - `"max(salary * 5)": {"func": "sum", "expr": "result = (rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
+- `"fields"`: `fields` is the map of the aliases for complex and calculated fields. For example:
+    - `"sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
+    - `"min(salary)":     {"func": "sum", "expr": "rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
+    - `"max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
   
-- `"filter"`: Filter is a lua `if` statement. It can include any valid lua boolean statement. These statements have a generic form of:
-  `if <boolean expression> then select_rec = true end`
+- `"filter"`: Filter is a lua boolean statement.
 
-  If the value of the `select_rec` is `true`, the record will be included in the results. Example:
-   `if rec['age'] ~= nil and rec['age'] > 25 then select_rec = true end`
+  If the value of the `statement` is `true`, the record will be included in the results. Example:
+   `rec['age'] ~= nil and rec['age'] > 25`
   
 - `"group_by_fields"`: List of field aliases to group the fields. Example:
 	`[
