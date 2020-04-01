@@ -469,11 +469,14 @@ function select_agg_records(stream, args)
   local function map_aggregates(rec)
 
     local accu = map()
-    local info = map{key = '', rec = map(), agg_results = map({count = 0})}
+    local info = map{key = '', rec = map(), agg_results = map({count = 1})}
 
     if raw_fields ~= nil then
       for alias, v in pairs(raw_fields) do
-        info.rec[alias] = rec[v]
+        local vvv = rec[v]
+        if rec[v] ~= nil then
+          info.rec[alias] =  vvv
+        end
       end
     end
 
@@ -485,11 +488,11 @@ function select_agg_records(stream, args)
         setfenv(f, context)
         f()
 
-        info.agg_results[alias] = context.result
+        if type(context.result) == "number" then
+          info.agg_results[alias] = context.result
+        end
       end
     end
-
-    info.agg_results.count = info.agg_results.count + 1
 
     local m = md5.new()
     if group_by_fields ~= nil then
@@ -511,8 +514,6 @@ function select_agg_records(stream, args)
   local function accu_tuples(tuple1, tuple2)
     -- accumulate
     local aggs = map()
-
-    aggs.count = (tuple1.agg_results.count or 0) + (tuple2.agg_results.count or 0)
 
     for f, v in map.pairs(tuple1.agg_results) do
       local fn = (aggregate_fields[f] and aggregate_fields[f].func) or ""
@@ -539,6 +540,7 @@ function select_agg_records(stream, args)
     end
 
     tuple1.agg_results = aggs
+    tuple1.agg_results.count = (tuple1.agg_results.count or 0) + (tuple2.agg_results.count or 0)
 
     return tuple1
   end

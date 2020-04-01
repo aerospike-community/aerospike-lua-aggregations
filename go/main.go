@@ -64,11 +64,13 @@ func queryAggregate(client *aero.Client, nsName, setName string) error {
 
 	functionArgsMap := map[string]interface{}{
 		"fields": map[string]interface{}{
-			"name":            "name",
-			"max(age)":        map[string]string{"func": "max", "expr": "rec['age'] ~= nil and rec['age']"},
-			"count(age)":      map[string]string{"func": "count", "expr": "( rec['age'] ) ~= nil and 1"},
-			"min(age)":        map[string]string{"func": "min", "expr": "rec['age'] ~= nil and rec['age']"},
-			"sum(age*salary)": map[string]string{"func": "sum", "expr": "(rec['age']  or 0) * (rec['salary'] or 0)"},
+			"name":              "name",
+			"doesnt_exist":      "doesnt_exist",
+			"max(doesnt_exist)": map[string]string{"func": "max", "expr": "rec['doesnt_exist']"},
+			"max(age)":          map[string]string{"func": "max", "expr": "rec['age']"},
+			"count(age)":        map[string]string{"func": "count", "expr": "rec['age'] ~= nil and 1"},
+			"min(age)":          map[string]string{"func": "min", "expr": "rec['age']"},
+			"sum(age*salary)":   map[string]string{"func": "sum", "expr": "(rec['age']  or 0) * (rec['salary'] or 0)"},
 		},
 		"filter": "rec['age'] ~= nil and rec['age'] > 5",
 		"group_by_fields": []string{
