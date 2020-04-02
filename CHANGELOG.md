@@ -1,6 +1,6 @@
 # Change History
 
-## April 1 2020: v1.0.1
+## April 3 2020: v1.0.1
 
   * **Improvements**
 

@@ -67,12 +67,7 @@ func aeroQuery(client *aero.Client, nsName, setName string, payload map[string]i
 		v := result.Record.Bins["SUCCESS"].(map[interface{}]interface{})
 		for _, prec := range v {
 			rres := map[string]interface{}{}
-			for k, v := range prec.(map[interface{}]interface{})["agg_results"].(map[interface{}]interface{}) {
-				if k.(string) != "count" {
-					rres[k.(string)] = toInt64(v)
-				}
-			}
-			for k, v := range prec.(map[interface{}]interface{})["rec"].(map[interface{}]interface{}) {
+			for k, v := range prec.(map[interface{}]interface{}) {
 				if i, ok := v.(float64); ok {
 					rres[k.(string)] = toInt64(i)
 				} else if i, ok := v.(int); ok {

@@ -24,7 +24,7 @@ var (
 	user     = flag.String("U", "", "User.")
 	password = flag.String("P", "", "Password.")
 
-	recordCount = flag.Int("r", 10000, "number of records")
+	recordCount = flag.Int("r", 1000, "number of records")
 	nameVariety = flag.Int("v", 100, "number of unique names")
 
 	currentPath = flag.String("lua", "", "Lua Path")

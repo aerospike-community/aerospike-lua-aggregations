@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -9,7 +10,6 @@ import (
 	"runtime"
 
 	aero "github.com/aerospike/aerospike-client-go"
-	"github.com/k0kubun/pp"
 )
 
 var (
@@ -71,10 +71,12 @@ func queryAggregate(client *aero.Client, nsName, setName string) error {
 			"count(age)":        map[string]string{"func": "count", "expr": "rec['age'] ~= nil and 1"},
 			"min(age)":          map[string]string{"func": "min", "expr": "rec['age']"},
 			"sum(age*salary)":   map[string]string{"func": "sum", "expr": "(rec['age']  or 0) * (rec['salary'] or 0)"},
+			"sum(age)":          map[string]string{"func": "sum", "expr": "rec['age']"},
 		},
-		"filter": "rec['age'] ~= nil and rec['age'] > 5",
+		"filter": "rec['age'] ~= nil and rec['age'] > 25",
 		"group_by_fields": []string{
 			"name",
+			"lastname",
 		},
 	}
 
@@ -90,7 +92,8 @@ func queryAggregate(client *aero.Client, nsName, setName string) error {
 			return result.Err
 		}
 
-		pp.Println(result.Record.Bins["SUCCESS"])
+		// pp.Println(result.Record.Bins["SUCCESS"])
+		fmt.Println("DONE!", len(result.Record.Bins["SUCCESS"].(map[interface{}]interface{})))
 	}
 
 	return nil
