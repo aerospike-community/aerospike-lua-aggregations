@@ -1,0 +1,25 @@
+# Tests
+
+The code in this directory is the test suite for the `aggAPI.lua`. The test code is written in Go.
+
+# Requirements
+
+- Go 1.12+
+- sqlite3
+- Aerospike Server 3+
+
+# How to run the tests
+
+You need to copy the `aerospike-lua-aggregations` to `$GOPATH/src/aerospike/aerospike-lua-aggregations`
+
+Then:
+
+```sh
+$ go get -u -v ./...
+
+$ ASLUA="$GOPATH/src/github.com/aerospike/aerospike-lua-aggregations"
+
+$ cd test
+
+$ ginkgo test . -- -h <host> -p <port> -U <user> -P <pass> -lua $ASLUA
+```
