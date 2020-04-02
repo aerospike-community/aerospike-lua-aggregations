@@ -30,30 +30,20 @@ The Lua streaming UDF will use the argument you pass to it in its calculations b
 ```json
 {
   "8de6a795aaf29f2a7dad71c6631a1efc": {
-    "agg_results": {
-      "count(age)":      3.000000,
-      "max(age)":        45.000000,
-      "count":           3.000000,
-      "sum(age*salary)": 101400,
-      "min(age)":        25.000000,
-    },
-    "key": "8de6a795aaf29f2a7dad71c6631a1efc",
-    "rec": {
-      "name": "Eva",
-    },
+    "count(age)":      3.000000,
+    "max(age)":        45.000000,
+    "count":           3.000000,
+    "sum(age*salary)": 101400,
+    "min(age)":        25.000000,
+    "name":            "Eva",
   },
   "ed57af7ff6ed54ec8b6b5eec3e2b649a": {
-    "agg_results": {
-      "count(age)":      1.000000,
-      "max(age)":        26.000000,
-      "count":           1.000000,
-      "sum(age*salary)": 83200,
-      "min(age)":        26.000000,
-    },
-    "key": "ed57af7ff6ed54ec8b6b5eec3e2b649a",
-    "rec": {
-      "name": "Riley",
-    },
+    "count(age)":      1.000000,
+    "max(age)":        26.000000,
+    "count":           1.000000,
+    "sum(age*salary)": 83200,
+    "min(age)":        26.000000,
+    "name":            "Riley",
   },
 }
 ```
@@ -72,7 +62,7 @@ stm := aero.NewStatement(nsName, setName)
 
 functionArgsMap := map[string]interface{}{
   "fields": map[string]interface{}{
-    "name": "name",
+    "name":            "name",
     "max(age)":        map[string]string{"func": "max", "expr": "rec['age'] ~= nil and rec['age']"},
     "count(age)":      map[string]string{"func": "count", "expr": "( rec['age'] ) ~= nil and 1"},
     "min(age)":        map[string]string{"func": "min", "expr": "rec['age'] ~= nil and rec['age']"},

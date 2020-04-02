@@ -448,11 +448,12 @@ function select_agg_records(stream, args)
     end      
   end
 
+  local mapmetadata = getmetatable(map())
+
   local raw_fields = nil
   local aggregate_field_funcs = nil
   if aggregate_fields ~= nil then
     local eval = loadstring or load
-    local mapmetadata = getmetatable(map())
 
     aggregate_field_funcs = {}
     for alias, defs in map.pairs(aggregate_fields) do
@@ -476,13 +477,13 @@ function select_agg_records(stream, args)
   local function map_aggregates(rec)
 
     local accu = map()
-    local info = map{key = '', rec = map(), agg_results = map({count = 1})}
+    local info = map()
 
     if raw_fields ~= nil then
       for alias, v in pairs(raw_fields) do
         local vvv = rec[v]
         if vvv ~= nil then
-          info.rec[alias] =  vvv
+          info[alias] =  vvv
         end
       end
     end
@@ -497,7 +498,7 @@ function select_agg_records(stream, args)
 
         local t = type(context.result)
         if t == "number" then
-          info.agg_results[alias] = context.result
+          info[alias] = context.result
         elseif t == "nil" then
           -- do nothing; nil is acceptible, but not actionable
         else
@@ -509,7 +510,7 @@ function select_agg_records(stream, args)
     local m = md5.new()
     if group_by_fields ~= nil then
       for v in list.iterator(group_by_fields) do
-        local lv = tostring(rec[v] or info.rec[v] or info.agg_results[v])
+        local lv = tostring(rec[v] or info[v])
         -- makes sure sharded values do not concat to the exact same value
         m:update(tostring(#lv))
         m:update(lv)
@@ -526,34 +527,42 @@ function select_agg_records(stream, args)
     -- accumulate
     local aggs = map()
 
-    for f, v in map.pairs(tuple1.agg_results) do
-      local fn = (aggregate_fields[f] and aggregate_fields[f].func) or ""
-
-      local t1 = tuple1.agg_results[f]
-      local t2 = tuple2.agg_results[f]
-      aggs[f] = t1
-
-      if fn == "sum" or fn == "count" then
-        aggs[f] = (v or 0) + (t2 or 0)
-      elseif fn == "min" then
-        if (t2 ~= nil) and (t1 ~= nil) then
-          if t2 < t1 then aggs[f] = t2 end
-        elseif t2 ~= nil and t1 == nil then 
-          aggs[f] = t2
+    for f, defs in map.pairs(aggregate_fields) do
+      if getmetatable(defs) ~= mapmetadata then
+        -- normal field, no aggregation needed
+        local t = tuple1[f] or tuple2[f]
+        if t ~= nil then
+          aggs[f] = t
         end
-      elseif fn == "max" then
-        if (t2 ~= nil) and (t1 ~= nil) then
-          if t2 > t1 then aggs[f] = t2 end
-        elseif t2 ~= nil and t1 == nil then 
-          aggs[f] = t2
+      else
+        local fn = defs.func
+
+        local t1 = tuple1[f]
+        local t2 = tuple2[f]
+
+        if t1 ~= nil and t2 ~= nil then
+          aggs[f] = t1
+
+          if fn == "sum" or fn == "count" then
+            aggs[f] = (t1 or 0) + (t2 or 0)
+          elseif fn == "min" then
+            if (t2 ~= nil) and (t1 ~= nil) then
+              if t2 < t1 then aggs[f] = t2 end
+            elseif t2 ~= nil and t1 == nil then 
+              aggs[f] = t2
+            end
+          elseif fn == "max" then
+            if (t2 ~= nil) and (t1 ~= nil) then
+              if t2 > t1 then aggs[f] = t2 end
+            elseif t2 ~= nil and t1 == nil then 
+              aggs[f] = t2
+            end
+          end
         end
       end
     end
 
-    tuple1.agg_results = aggs
-    tuple1.agg_results.count = (tuple1.agg_results.count or 0) + (tuple2.agg_results.count or 0)
-
-    return tuple1
+    return aggs
   end
 
   local function reduce_aggregates(accu1, accu2)
