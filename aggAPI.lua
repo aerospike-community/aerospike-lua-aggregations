@@ -448,6 +448,7 @@ function select_agg_records(stream, args)
     end      
   end
 
+  local raw_fields = nil
   local aggregate_field_funcs = nil
   if aggregate_fields ~= nil then
     local eval = loadstring or load
@@ -467,6 +468,8 @@ function select_agg_records(stream, args)
         raw_fields[alias] = defs
       end
     end
+  else
+    error("No fields specified to return")
   end
 
 
@@ -478,7 +481,7 @@ function select_agg_records(stream, args)
     if raw_fields ~= nil then
       for alias, v in pairs(raw_fields) do
         local vvv = rec[v]
-        if rec[v] ~= nil then
+        if vvv ~= nil then
           info.rec[alias] =  vvv
         end
       end
@@ -514,7 +517,6 @@ function select_agg_records(stream, args)
     end
     local key = md5.tohex(m:finish())
 
-    info.key = key
     accu[key] = info
 
     return accu
@@ -532,7 +534,7 @@ function select_agg_records(stream, args)
       aggs[f] = t1
 
       if fn == "sum" or fn == "count" then
-        aggs[f] = v + t2
+        aggs[f] = (v or 0) + (t2 or 0)
       elseif fn == "min" then
         if (t2 ~= nil) and (t1 ~= nil) then
           if t2 < t1 then aggs[f] = t2 end
