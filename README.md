@@ -126,11 +126,13 @@ try {
     if (obj instanceof Map<?, ?>) {
       Map<String, Map> map = (Map<String, Map>) obj;
 
-      for (Map<?,?> x: map.values()){
-        console.warn("res: " +
-            ((Map<?,?>)x.get("rec")).get("test_id") + " " +
-            ((Map<?,?>)x.get("rec")).get("state") + " " +
-            ((Map<?,?>)x.get("agg_results")).get("count"));
+        map.values().forEach(res -> {
+            console.info(res.toString());
+
+            console.info("res: %s, %s => %s",
+                    res.get("test_id"),
+                    res.get("state"),
+                    res.get("count(*)"));
       }
     }
   }
@@ -285,26 +287,40 @@ then the parameters sent to the UDF would be:
 
 ## What are the meaning of the values sent to the Lua UDF?
 
-There are 5 different input that need to be sent to the Lua UDF. Not all are required for every command. These values are:
+There are 3 different input that need to be sent to the Lua UDF. Not all are required for every command. These values are:
 
-- `"raw_fields"`: Raw fields denote fields in the result which do not require any complex calculation. The map key is the alias, while the map value is the name of the existing bin in the database. Example:
+- `"fields"`: Choosing the fields to return - this is the equivalent of the `select` part of the query.
+    - Fields which do not require any complex calculation: the map key is the alias, while the map value is the name of the existing bin in the database.  
+    Example:
+      ```
+      fields": {
+        "age": "age",  
+        "salary_usd" : "salary"  
+      }
+      ```
+    - Fields which are calculated (apply an aggregate function on): the map key is the aliases, and the value is a map of the function and its calculation.  
+      Example:
+      ```
+      "fields": {
+        "sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}, 
+        "min(salary)":     {"func": "sum", "expr": "rec['salary']"},
+        "max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}
+      }
+      ```
+        - `"sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
+        - `"min(salary)":     {"func": "sum", "expr": "rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
+        - `"max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
   
-  `"raw_fields": {
-    "age": "age", 
-    "salary_usd" : "salary"
-  }`
-
-- `"fields"`: `fields` is the map of the aliases for complex and calculated fields. For example:
-    - `"sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
-    - `"min(salary)":     {"func": "sum", "expr": "rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
-    - `"max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
+- `"filter"`: Filter is a lua boolean statement to filter records - this is the equivalent of a `where` in a query.  
+  If the value of the `statement` is `true`, the record will be included in the results.
   
-- `"filter"`: Filter is a lua boolean statement.
-
-  If the value of the `statement` is `true`, the record will be included in the results. Example:
-   `rec['age'] ~= nil and rec['age'] > 25`
+  Example:   
+   `"filter": "rec['age'] ~= nil and rec['age'] > 25"`
   
-- `"group_by_fields"`: List of field aliases to group the fields. Example:
-	`[
-	    "age", "salary_udf"
-	 ]`
+- `"group_by_fields"`: List of field aliases to group the records by - this is the equivalent of `group by` in a query.   
+Example:
+    ```
+    "group_by_fields": [
+        "age", "salary_udf"
+     ]
+    ```
