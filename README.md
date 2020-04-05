@@ -10,6 +10,7 @@ Aerospike Server supports Lua 5.1, in which all numbers are floats with 51 bits 
 
 You need to register the provided `aggAPI.lua` file as a UDF in your database. 
 
+#### Using Go to register the module:
 Here an example in Go (note that for the sake of conciseness, the errors are not checked in this example):
 ```go
 luaFile, _ := ioutil.ReadFile("aggAPI.lua")
@@ -19,7 +20,7 @@ _ <-regTask.OnComplete()
 ```
 For more information: [Go Client UDF](https://www.aerospike.com/docs/client/go/usage/udf/register.html).
 
-Using Java to register the module:
+#### Using Java to register the module:
 ```java
 RegisterTask task = client.register(params.policy, "udf/aggAPI.lua", "aggAPI.lua", Language.LUA);
 // Alternately register from resource.
@@ -27,7 +28,7 @@ task.waitTillComplete();
 ```
 For more information: [Java Client UDF](https://www.aerospike.com/docs/client/java/usage/udf/register.html).
 
-Using AQL to register the module:
+#### Using AQL to register the module:
 ```
 aql> register module 'aggAPI.lua'
 ```
@@ -35,7 +36,7 @@ For more information: [manging UDF using AQL](https://www.aerospike.com/docs/too
 
 ## How does it work?
 
-The Lua streaming UDF will use the argument you pass to it in its calculations by `eval`ing the arguments, and then using them in its logic to calculate and filter the records mostly on the server-side. 
+The Lua [streaming UDF](https://www.aerospike.com/docs/udf/developing_stream_udfs.html) will use the argument you pass to it in its calculations by `eval`ing the arguments, and then using them in its logic to calculate and filter the records mostly on the server-side. 
 ```json
     "fields": {
         "name":            "name",
@@ -79,7 +80,7 @@ The client does not calculate average values, but that can be accomplished as th
 
 Keep in mind that the values are limited to the size of Lua's value size, which is 51 bits of significant integer values.
 
-## What are the meaning of the values sent to the Lua UDF?
+## What is the meaning of the values sent to the UDF?
 
 There are 3 different input that need to be sent to the Lua UDF. Not all are required for every command. These values are:
 
