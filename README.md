@@ -43,7 +43,7 @@ The Lua streaming UDF will use the argument you pass to it in its calculations b
     },
     "filter": "rec['age'] ~= nil and rec['age'] >5 ",
     "group_by_fields": {
-      "name",
+      "name"
     }
 ```
 
@@ -260,7 +260,7 @@ then the parameters sent to the UDF would be:
 ```
 
 ## Code Examples
-###Example in Go:
+### Example in Go:
 ```go
 stm := aero.NewStatement(nsName, setName)
 
