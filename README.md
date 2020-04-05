@@ -8,25 +8,50 @@ Aerospike Server supports Lua 5.1, in which all numbers are floats with 51 bits 
 
 ## How to setup?
 
-You need to register the provided `aggAPI.lua` file as a UDF in your database. Here an example in Go (Note that for the sake of conciseness, the errors are not checked in this example):
+You need to register the provided `aggAPI.lua` file as a UDF in your database. 
 
+#### Using Go to register the module:
+Here an example in Go (note that for the sake of conciseness, the errors are not checked in this example):
 ```go
 luaFile, _ := ioutil.ReadFile("aggAPI.lua")
 regTask, _ := client.RegisterUDF(nil, luaFile, "aggAPI.lua", aero.LUA)
 // wait until UDF is created on the server.
 _ <-regTask.OnComplete()
 ```
+For more information: [Go Client register UDF](https://www.aerospike.com/docs/client/go/usage/udf/register.html).
 
+#### Using Java to register the module:
 ```java
 RegisterTask task = client.register(params.policy, "udf/aggAPI.lua", "aggAPI.lua", Language.LUA);
 // Alternately register from resource.
 task.waitTillComplete();
 ```
+For more information: [Java Client register UDF](https://www.aerospike.com/docs/client/java/usage/udf/register.html).
+
+#### Using AQL to register the module:
+```
+aql> register module 'aggAPI.lua'
+```
+For more information: [manging UDF using AQL](https://www.aerospike.com/docs/tools/aql/udf_management.html).
 
 ## How does it work?
 
-The Lua streaming UDF will use the argument you pass to it in its calculations by `eval`ing the arguments, and then using them in its logic to calculate and filter the records mostly on the server-side. A last pass will occur on client-side and the results will return in the following format:
+The Lua [streaming UDF](https://www.aerospike.com/docs/udf/developing_stream_udfs.html) will use the argument you pass to it in its calculations by `eval`ing the arguments, and then using them in its logic to calculate and filter the records mostly on the server-side. 
+```json
+    "fields": {
+        "name":            "name",
+        "max(age)":        {"func": "max", "expr": "rec['age'] ~= nil and rec['age']"},
+        "count(age)":      {"func": "count", "expr": "( rec['age'] ) ~= nil and 1"},
+        "min(age)":        {"func": "min", "expr": "rec['age'] ~= nil and rec['age']"},
+        "sum(age*salary)": {"func": "sum", "expr": " (rec['age']  or 0) * (rec['salary'] or 0)"},
+    },
+    "filter": "rec['age'] ~= nil and rec['age'] >5 ",
+    "group_by_fields": {
+      "name"
+    }
+```
 
+A last pass will occur on client-side and the results will return in the following format:
 ```json
 {
   "8de6a795aaf29f2a7dad71c6631a1efc": {
@@ -47,16 +72,220 @@ The Lua streaming UDF will use the argument you pass to it in its calculations b
   },
 }
 ```
-
-The client does not calculate average values, but that can be accomplished as the last step on the client.
-
-Regardless of the aggregations you have asked, the count of final records will always be returned in `aggs.count`. Try to avoid this name in your requests.
-
-The `key` value is the hash used to group the results for reduction. The `aggs` key returns the aggregate values, while the `rec` key returns the bins which were passed as `raw_field`.
+The `key` is a hash used to group the results for reduction. The value is a map of the returned fields. In the map, the key is the alias of the field.
 
 Keep in mind that the values are limited to the size of Lua's value size, which is 51 bits of significant integer values.
 
-Example in Go:
+## What is the meaning of the values sent to the UDF?
+
+There are 3 different input that need to be sent to the Lua UDF. Not all are required for every command. These values are:
+
+- `"fields"`: Choosing the fields to return - this is the equivalent of the `select` part of the query.
+    - Fields which do not require any complex calculation: the map key is the alias, while the map value is the name of the existing bin in the database.  
+    Example:
+      ```json
+      fields": {
+        "age": "age",  
+        "salary_usd" : "salary"  
+      }
+      ```
+    - Fields which are calculated (apply an aggregate function on): the map key is the aliases, and the value is a map of the function and its calculation.
+      Available functions are `count`, `sum`, `min`, `max`.   
+             
+      Example:
+      ```json
+      "fields": {
+        "sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}, 
+        "min(salary)":     {"func": "sum", "expr": "rec['salary']"},
+        "max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}
+      }
+      ```
+        - `"sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
+        - `"min(salary)":     {"func": "sum", "expr": "rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
+        - `"max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
+  
+- `"filter"`: Filter is a lua boolean statement to filter records - this is the equivalent of a `where` in a query.  
+  If the value of the `statement` is `true`, the record will be included in the results.
+  
+  Example:   
+   `"filter": "rec['age'] ~= nil and rec['age'] > 25"`
+  
+- `"group_by_fields"`: List of field aliases to group the records by - this is the equivalent of `group by` in a query.   
+Example:
+    ```json
+    "group_by_fields": [
+        "age", "salary_udf"
+     ]
+    ```
+
+## Example: Building a Query
+
+### How can I calculate a sum?
+
+To calculate the equivalent of the following SQL:
+
+```sql
+select sum(salary) from employees
+```
+
+We would call the `select_agg_records` function with following argument:
+
+```json
+{
+  "fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
+  },
+}
+```
+Which means use the value of the bin `salary`. If the `salary` bin is `null` or does not exist, 0 will be used as default value.
+We name this calculation `sum(salary)`.
+
+### Adding a conditions
+
+To add a filtering condition:
+
+```sql
+select sum(salary) from employees where age > 25
+```
+
+provide the following arguments:
+
+```json
+{
+  "fields":         {
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
+  },
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
+}
+```
+
+Which means check if the `age` bin exists, and if it does, check if the age is over 25.
+
+### Adding a `Group BY`
+
+To create a group by aggregation, we would need to add the fields both to the `fields` part and to the group by.
+
+```sql
+select name, age, sum(salary) from employees where age > 25 group by name, age
+```
+provide the following arguments:
+```json
+{
+  "fields":         {
+    "age":  "age",
+    "name": "name",
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
+  },
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
+  "group_by_fields": [
+    "age",
+    "name",
+  ],
+}
+```
+**Please note: the UDF logic does not validate if your provided `group by` arguments are valid for the logic of the equivalent SQL command.**
+
+### Adding `min` and `max` functions
+
+To add other fields to the query like:
+
+```sql
+select age, min(salary), max(salary), sum(salary) from employees where age > 25 group by age
+```
+
+provide the following arguments:
+
+```json
+{
+  "fields":         {
+    "age": "age",
+    "min(salary)": {"func": "min" , "expr": "rec['salary']"},
+    "max(salary)": {"func": "max" , "expr": "rec['salary']"},
+    "sum(salary)": {"func": "sum" , "expr": "rec['salary']"},
+  },
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
+  "group_by_fields": [
+    "age",
+  ],
+}
+```
+
+### Can I do more complex statements in the functions and filters?
+
+YES! The execute the equivalent of the following SQL command:
+
+```sql
+select age, min(salary), max(salary), sum(salary * 2) from employees where age > 25 group by age
+```
+
+provide the following arguments:
+
+```json
+{
+  "fields":         {
+    "age": "age",
+    "sum(salary * 2)": {"func": "sum" , "expr": "rec['salary'] * 2"},
+    "min(salary)":     {"func": "min" , "expr": "rec['salary']"},
+    "max(salary)":     {"func": "max" , "expr": "rec['salary']"},
+  },
+  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
+  "group_by_fields": [
+    "age",
+  ],
+}
+```
+
+## How can I calculate average?
+
+The UDF does not have an `avg` function so there is no equivalent for this SQL query:
+```sql
+select age, avg(salary) from employees group by age
+```
+Calculating the average needs to be done manually by the client - query `sum` and `count` and calculate the `avg` from them.
+
+Using the UDF to get sum and count:
+```json
+{
+  "fields":         {
+    "age": "age",
+    "sum(salary)":     {"func": "sum" , "expr": "rec['salary']"},
+    "count(*)":        {"func": "count" , "expr": "1"}
+  },
+  "group_by_fields": [
+    "age",
+  ],
+}
+```
+
+## How can I do `DISTINCT` queries?
+
+In case you would want to return the following SQL statement:
+
+```sql
+select distinct age from employees
+```
+
+since you can rewrite the above query as:
+
+```sql
+select age from employees group by age
+```
+
+then the parameters sent to the UDF would be:
+
+```json
+{
+  "fields": {
+    "age": "age",
+  },
+  "group_by_fields": [
+    "age",
+  ],
+}
+```
+
+## Code Examples
+### Example in Go:
 ```go
 stm := aero.NewStatement(nsName, setName)
 
@@ -90,7 +319,7 @@ for result := range recordset.Results() {
 }
 ```
 
-Example in Java:
+### Example in Java:
 ```java
 String stringToParse = String.format("{\n" +
     "  \"fields\":         {\n" +
@@ -126,11 +355,13 @@ try {
     if (obj instanceof Map<?, ?>) {
       Map<String, Map> map = (Map<String, Map>) obj;
 
-      for (Map<?,?> x: map.values()){
-        console.warn("res: " +
-            ((Map<?,?>)x.get("rec")).get("test_id") + " " +
-            ((Map<?,?>)x.get("rec")).get("state") + " " +
-            ((Map<?,?>)x.get("agg_results")).get("count"));
+        map.values().forEach(res -> {
+            console.info(res.toString());
+
+            console.info("res: %s, %s => %s",
+                    res.get("test_id"),
+                    res.get("state"),
+                    res.get("count(*)"));
       }
     }
   }
@@ -139,172 +370,4 @@ try {
 finally {
   rs.close();
 }
-
 ```
-
-## How can I calculate a sum?
-
-To calculate the equivalent of the following SQL:
-
-```sql
-select sum(salary) from employees
-```
-
-call the `select_agg_records` function with following argument:
-
-```json
-{
-  "fields":         {
-    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
-  },
-}
-```
-
-## Adding conditions
-
-To add a condition like:
-
-```sql
-select sum(salary) from employees where age > 25
-```
-
-provide the following arguments:
-
-```json
-{
-  "fields":         {
-    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
-  },
-  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
-}
-```
-
-## Adding `Group BY`
-
-To add other fields to the query like:
-
-```sql
-select name, age, sum(salary) from employees where age > 25 group by name, age
-```
-
-provide the following arguments:
-
-```json
-{
-  "fields":         {
-    "age":  "age",
-    "name": "name",
-    "sum(salary)": {"func": "sum" , "expr": "rec['salary'] or 0"},
-  },
-  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
-  "group_by_fields": [
-    "age",
-    "name",
-  ],
-}
-```
-
-keep in mind that the UDF logic does not validate if your provided `group by` arguments are valid for the logic of the equivalent SQL command.
-
-## Adding `min` and `max` functions
-
-To add other fields to the query like:
-
-```sql
-select age, min(salary), max(salary), sum(salary) from employees where age > 25 group by age
-```
-
-provide the following arguments:
-
-```json
-{
-  "fields":         {
-    "age": "age",
-    "min(salary)": {"func": "min" , "expr": "rec['salary']"},
-    "max(salary)": {"func": "max" , "expr": "rec['salary']"},
-    "sum(salary)": {"func": "sum" , "expr": "rec['salary']"},
-  },
-  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
-  "group_by_fields": [
-    "age",
-  ],
-}
-```
-
-## Can I do more complex statements in the functions and filters?
-
-YES! The execute the equivalent of the following SQL command:
-
-```sql
-select age, min(salary), max(salary), sum(salary * 2) from employees where age > 25 group by age
-```
-
-provide the following arguments:
-
-```json
-{
-  "fields":         {
-    "age": "age",
-    "sum(salary * 2)": {"func": "sum" , "expr": "rec['salary'] * 2"},
-    "min(salary)":     {"func": "min" , "expr": "rec['salary']"},
-    "max(salary)":     {"func": "max" , "expr": "rec['salary']"},
-  },
-  "filter":    "rec['age'] ~= nil and rec['age'] > 25",
-  "group_by_fields": [
-    "age",
-  ],
-}
-```
-
-## How can I do DISTINCT queries?
-
-In case you would want to return the following SQL statement:
-
-```sql
-select distinct age from employees
-```
-
-since you can rewrite the above query as:
-
-```sql
-select age from employees group by age
-```
-
-then the parameters sent to the UDF would be:
-
-```json
-{
-  "fields": {
-    "age": "age",
-  },
-  "group_by_fields": [
-    "age",
-  ],
-}
-```
-
-## What are the meaning of the values sent to the Lua UDF?
-
-There are 5 different input that need to be sent to the Lua UDF. Not all are required for every command. These values are:
-
-- `"raw_fields"`: Raw fields denote fields in the result which do not require any complex calculation. The map key is the alias, while the map value is the name of the existing bin in the database. Example:
-  
-  `"raw_fields": {
-    "age": "age", 
-    "salary_usd" : "salary"
-  }`
-
-- `"fields"`: `fields` is the map of the aliases for complex and calculated fields. For example:
-    - `"sum(salary * 2)": {"func": "sum", "expr": "rec['salary'] * 2"}` means a field with the name `sum(salary * 2)` should be calculated from the value of the bin `salary` multiplied by 2. 
-    - `"min(salary)":     {"func": "sum", "expr": "rec['salary']"}`: use the value of the bin `salary` to calculate `min(salary)`
-    - `"max(salary * 5)": {"func": "sum", "expr": "(rec['salary'] or 0) * 5"}`: use the value of the bin `salary` multiplied by 5 to calculate the max value. If the `salary` bin is `null`, 0 will be used as default value.
-  
-- `"filter"`: Filter is a lua boolean statement.
-
-  If the value of the `statement` is `true`, the record will be included in the results. Example:
-   `rec['age'] ~= nil and rec['age'] > 25`
-  
-- `"group_by_fields"`: List of field aliases to group the fields. Example:
-	`[
-	    "age", "salary_udf"
-	 ]`
