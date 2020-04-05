@@ -17,6 +17,7 @@ regTask, _ := client.RegisterUDF(nil, luaFile, "aggAPI.lua", aero.LUA)
 // wait until UDF is created on the server.
 _ <-regTask.OnComplete()
 ```
+For more information: [Go Client UDF](https://www.aerospike.com/docs/client/go/usage/udf/register.html).
 
 Using Java to register the module:
 ```java
@@ -24,11 +25,13 @@ RegisterTask task = client.register(params.policy, "udf/aggAPI.lua", "aggAPI.lua
 // Alternately register from resource.
 task.waitTillComplete();
 ```
+For more information: [Java Client UDF](https://www.aerospike.com/docs/client/java/usage/udf/register.html).
 
 Using AQL to register the module:
 ```
 aql> register module 'aggAPI.lua'
 ```
+For more information: [manging UDF using AQL](https://www.aerospike.com/docs/tools/aql/udf_management.html).
 
 ## How does it work?
 
@@ -43,7 +46,7 @@ The Lua streaming UDF will use the argument you pass to it in its calculations b
     },
     "filter": "rec['age'] ~= nil and rec['age'] >5 ",
     "group_by_fields": {
-      "name",
+      "name"
     }
 ```
 
@@ -260,7 +263,7 @@ then the parameters sent to the UDF would be:
 ```
 
 ## Code Examples
-###Example in Go:
+### Example in Go:
 ```go
 stm := aero.NewStatement(nsName, setName)
 
