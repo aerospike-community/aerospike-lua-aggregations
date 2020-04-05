@@ -18,7 +18,7 @@ regTask, _ := client.RegisterUDF(nil, luaFile, "aggAPI.lua", aero.LUA)
 // wait until UDF is created on the server.
 _ <-regTask.OnComplete()
 ```
-For more information: [Go Client UDF](https://www.aerospike.com/docs/client/go/usage/udf/register.html).
+For more information: [Go Client register UDF](https://www.aerospike.com/docs/client/go/usage/udf/register.html).
 
 #### Using Java to register the module:
 ```java
@@ -26,7 +26,7 @@ RegisterTask task = client.register(params.policy, "udf/aggAPI.lua", "aggAPI.lua
 // Alternately register from resource.
 task.waitTillComplete();
 ```
-For more information: [Java Client UDF](https://www.aerospike.com/docs/client/java/usage/udf/register.html).
+For more information: [Java Client register UDF](https://www.aerospike.com/docs/client/java/usage/udf/register.html).
 
 #### Using AQL to register the module:
 ```
@@ -74,10 +74,6 @@ A last pass will occur on client-side and the results will return in the followi
 ```
 The `key` is a hash used to group the results for reduction. The value is a map of the returned fields. In the map, the key is the alias of the field.
 
-Regardless of the aggregations used, a count of records in the group will always be returned in `count`. Avoid using this name in your requests.
-
-The client does not calculate average values, but that can be accomplished as the last step at the client (sum and count).
-
 Keep in mind that the values are limited to the size of Lua's value size, which is 51 bits of significant integer values.
 
 ## What is the meaning of the values sent to the UDF?
@@ -93,7 +89,9 @@ There are 3 different input that need to be sent to the Lua UDF. Not all are req
         "salary_usd" : "salary"  
       }
       ```
-    - Fields which are calculated (apply an aggregate function on): the map key is the aliases, and the value is a map of the function and its calculation.  
+    - Fields which are calculated (apply an aggregate function on): the map key is the aliases, and the value is a map of the function and its calculation.
+      Available functions are `count`, `sum`, `min`, `max`.   
+             
       Example:
       ```json
       "fields": {
@@ -121,6 +119,7 @@ Example:
     ```
 
 ## Example: Building a Query
+
 ### How can I calculate a sum?
 
 To calculate the equivalent of the following SQL:
@@ -230,6 +229,28 @@ provide the following arguments:
     "max(salary)":     {"func": "max" , "expr": "rec['salary']"},
   },
   "filter":    "rec['age'] ~= nil and rec['age'] > 25",
+  "group_by_fields": [
+    "age",
+  ],
+}
+```
+
+## How can I calculate average?
+
+The UDF does not have an `avg` function so there is no equivalent for this SQL query:
+```sql
+select age, avg(salary) from employees group by age
+```
+Calculating the average needs to be done manually by the client - query `sum` and `count` and calculate the `avg` from them.
+
+Using the UDF to get sum and count:
+```json
+{
+  "fields":         {
+    "age": "age",
+    "sum(salary)":     {"func": "sum" , "expr": "rec['salary']"},
+    "count(*)":        {"func": "count" , "expr": "1"}
+  },
   "group_by_fields": [
     "age",
   ],
