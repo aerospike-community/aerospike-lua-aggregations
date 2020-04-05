@@ -1,0 +1,9 @@
+# Java Examples Command Line Script.
+#
+# Build with maven before running this script.
+# mvn package
+#
+# Get the last version of aggAPI.lua
+wget https://raw.githubusercontent.com/aerospike-community/aerospike-lua-aggregations/master/aggAPI.lua -O udf/aggAPI.lua -q
+
+java -jar target/aerospike-*-jar-with-dependencies.jar $*
